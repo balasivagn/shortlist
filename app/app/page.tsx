@@ -32,6 +32,7 @@ export default function LandingPage() {
             <a href="#problem" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Problem</a>
             <a href="#solution" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Solution</a>
             <a href="#how-it-works" className="text-sm text-muted-foreground hover:text-foreground transition-colors">How It Works</a>
+            <a href="#architecture" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Architecture</a>
             <a href="#why" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Why ShortList</a>
           </div>
           <Link
@@ -235,6 +236,70 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Tech Architecture */}
+      <section id="architecture" className="py-20 md:py-32">
+        <div className="container">
+          <SectionLabel>Under the Hood</SectionLabel>
+          <h2 className="font-serif text-4xl md:text-5xl leading-[1.1] tracking-tight text-foreground mb-4 max-w-2xl">
+            A research swarm, not a chatbot.
+          </h2>
+          <p className="text-lg text-muted-foreground mb-16 max-w-xl">
+            When you describe what you need, ShortList deploys eight specialized agents in parallel — each with a distinct job. The result is a recommendation with actual evidence behind it.
+          </p>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-start">
+            {/* Agent swarm list */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {[
+                { num: "01", name: "Discovery", desc: "Finds relevant products across sources" },
+                { num: "02", name: "Evidence", desc: "Pulls reviews, specs, and real-world reports" },
+                { num: "03", name: "Risk", desc: "Identifies red flags and failure patterns" },
+                { num: "04", name: "Constraint Evaluation", desc: "Checks every option against your criteria" },
+                { num: "05", name: "User Fit", desc: "Scores options against who it's actually for" },
+                { num: "06", name: "Ranking", desc: "Produces an ordered shortlist with reasoning" },
+                { num: "07", name: "Memory", desc: "Saves preferences for smarter future runs" },
+                { num: "08", name: "Verification", desc: "Independent second opinion before output" },
+              ].map((agent) => (
+                <div key={agent.num} className="flex items-start gap-3 p-4 border border-border rounded-xl hover:shadow-md hover:shadow-black/[0.04] transition-all duration-200">
+                  <span className="font-mono text-[10px] text-muted-foreground mt-0.5 shrink-0">{agent.num}</span>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">{agent.name}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{agent.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="rounded-2xl overflow-hidden shadow-xl shadow-black/5 border border-border">
+              <img
+                src="/shortlist-architecture.png"
+                alt="ShortList research swarm architecture — from user query through 7 parallel agents to ranked shortlist"
+                className="w-full h-auto"
+              />
+            </div>
+          </div>
+
+          {/* Integrations strip */}
+          <div className="mt-16 pt-12 border-t border-border">
+            <p className="font-mono text-xs tracking-[0.1em] uppercase text-muted-foreground mb-6">Powered by</p>
+            <div className="flex flex-wrap gap-4">
+              {[
+                { name: "Vercel AI SDK", desc: "Orchestration" },
+                { name: "Exa", desc: "Web research" },
+                { name: "SerpApi", desc: "Product search" },
+                { name: "Mem0", desc: "Persistent memory" },
+                { name: "Claude", desc: "Verification" },
+              ].map((item) => (
+                <div key={item.name} className="flex items-center gap-2 px-4 py-2 bg-background border border-border rounded-full">
+                  <span className="text-sm font-medium text-foreground">{item.name}</span>
+                  <span className="text-xs text-muted-foreground">— {item.desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Why ShortList */}
       <section id="why" className="py-20 md:py-32">
         <div className="container">
@@ -259,30 +324,6 @@ export default function LandingPage() {
                 </div>
                 <h3 className="text-base font-medium text-foreground mb-2">{item.title}</h3>
                 <p className="text-sm text-muted-foreground leading-relaxed">{item.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Tech Stack */}
-      <section className="py-20 md:py-32 bg-secondary/50">
-        <div className="container">
-          <SectionLabel>Built With</SectionLabel>
-          <h2 className="font-serif text-4xl md:text-5xl leading-[1.1] tracking-tight text-foreground mb-12 max-w-2xl">
-            Powered by best-in-class AI infrastructure.
-          </h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-            {[
-              { name: "Vercel AI SDK", desc: "Orchestration & model access" },
-              { name: "Exa", desc: "Web research & evidence" },
-              { name: "SerpApi", desc: "Amazon product search" },
-              { name: "Mem0", desc: "Persistent preferences" },
-              { name: "Claude", desc: "Independent verification" },
-            ].map((item, i) => (
-              <div key={i} className="p-5 bg-background border border-border rounded-xl text-center">
-                <p className="text-sm font-medium text-foreground mb-1">{item.name}</p>
-                <p className="text-xs text-muted-foreground">{item.desc}</p>
               </div>
             ))}
           </div>
