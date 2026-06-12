@@ -1,28 +1,21 @@
-# Environment variables
+# Environment
 .env
 .env.local
 .env*.local
 
 # Dependencies
 node_modules/
-app/node_modules/
-design-landing/node_modules/
 
-# Build outputs
+# Build output
 .next/
-app/.next/
 dist/
 build/
 
-# Cache
+# Cache & misc
 .cache/
-app/.cache/
-
-# Misc
+tsconfig.tsbuildinfo
 .DS_Store
 *.log
-tsconfig.tsbuildinfo
-app/tsconfig.tsbuildinfo
 
-# Claude context
+# Claude Code
 .claude/
