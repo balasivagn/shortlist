@@ -25,6 +25,8 @@ const LOADING_STEPS = [
   "Generating recommendation…",
 ];
 
+const USED_KEY = "shortlist_used";
+
 export default function AppPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -32,14 +34,24 @@ export default function AppPage() {
   const [result, setResult] = useState<ResearchResult | null>(null);
   const [progressSteps, setProgressSteps] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [used, setUsed] = useState(() =>
+    globalThis.window !== undefined && localStorage.getItem(USED_KEY) === "1"
+  );
+  const [showToast, setShowToast] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
+  function showDemoLimitToast() {
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 4000);
+  }
+
   async function sendQuery(query: string) {
     if (!query.trim() || loading) return;
+    if (used) { showDemoLimitToast(); return; }
     setInput("");
     setError(null);
     setResult(null);
@@ -81,6 +93,8 @@ export default function AppPage() {
       }
 
       const data: ResearchResult = await res.json();
+      localStorage.setItem(USED_KEY, "1");
+      setUsed(true);
       setProgressSteps(data.researchProgress);
       setResult(data);
       setMessages((prev) => [
@@ -144,7 +158,8 @@ export default function AppPage() {
               </div>
               <button
                 onClick={() => sendQuery(DEMO_QUERY)}
-                className="inline-flex items-center gap-2 text-sm bg-[#E85D2A] hover:bg-[#d14e1f] text-white px-5 py-2.5 rounded-lg transition-all duration-150 active:scale-[0.97]"
+                disabled={used}
+                className="inline-flex items-center gap-2 text-sm bg-[#E85D2A] hover:bg-[#d14e1f] disabled:opacity-40 text-white px-5 py-2.5 rounded-lg transition-all duration-150 active:scale-[0.97]"
               >
                 Try the demo query
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -188,21 +203,30 @@ export default function AppPage() {
             </div>
           )}
 
-          <div className="shrink-0 border-t border-border px-4 py-3">
+          <div className="shrink-0 border-t border-border px-4 py-3 space-y-2">
+            {showToast && (
+              <div className="rounded-lg bg-[#1A1A1A] text-white text-xs px-3 py-2 flex items-center gap-2 animate-fade-in">
+                <span className="text-[#E85D2A]">●</span>
+                <span>This is a demo — each browser gets one free query. Want full access? <span className="underline cursor-pointer">Join the waitlist.</span></span>
+              </div>
+            )}
+            {used && !showToast && (
+              <p className="text-xs text-muted-foreground text-center">Demo limit reached — one query per browser.</p>
+            )}
             <div className="flex gap-2 items-end">
               <textarea
                 rows={1}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask ShortList to find a product…"
-                disabled={loading}
+                placeholder={used ? "Demo limit reached." : "Ask ShortList to find a product…"}
+                disabled={loading || used}
                 className="flex-1 resize-none rounded-xl border border-border bg-secondary/50 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[#E85D2A]/30 disabled:opacity-50"
                 style={{ maxHeight: 120 }}
               />
               <button
                 onClick={() => sendQuery(input)}
-                disabled={loading || !input.trim()}
+                disabled={loading || !input.trim() || used}
                 className="inline-flex items-center justify-center bg-[#E85D2A] hover:bg-[#d14e1f] disabled:opacity-40 text-white h-9 w-9 rounded-xl transition-all duration-150 active:scale-[0.97]"
               >
                 <ArrowRight className="w-4 h-4" />
