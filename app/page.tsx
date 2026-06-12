@@ -72,13 +72,11 @@ export default function LandingPage() {
               </div>
             </div>
             <div className="relative">
-              <div className="rounded-2xl overflow-hidden shadow-2xl shadow-black/5">
-                <img
-                  src={HERO_IMG}
-                  alt="From many options to one confident choice"
-                  className="w-full h-auto"
-                />
-              </div>
+              <img
+                src={HERO_IMG}
+                alt="From many options to one confident choice"
+                className="w-full h-auto"
+              />
             </div>
           </div>
 
