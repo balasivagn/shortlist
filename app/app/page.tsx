@@ -27,7 +27,6 @@ const USED_KEY = "shortlist_used";
 
 function HowWeDecided({ result }: { readonly result: ResearchResult }) {
   const [open, setOpen] = useState(false);
-  const criteriaLabels = Object.fromEntries(result.criteria.map((c) => [c.id, c.label]));
 
   return (
     <div className="rounded-xl border border-border overflow-hidden">
@@ -47,13 +46,7 @@ function HowWeDecided({ result }: { readonly result: ResearchResult }) {
           <MemoryCard memories={result.rememberedPreferences} />
           <CriteriaCard criteria={result.criteria} />
           <ProgressCard steps={result.researchProgress} loading={false} />
-          {/* expose criteriaLabels for ProductCards inside accordion too */}
-          <div className="space-y-3">
-            <p className="text-xs font-mono tracking-[0.1em] uppercase text-muted-foreground">Full Shortlist</p>
-            {result.shortlist.map((p, i) => (
-              <ProductCard key={p.product.id} product={p} rank={i} criteriaLabels={criteriaLabels} />
-            ))}
-          </div>
+          <MemorySaveCard suggestions={result.memorySuggestions} userId="demo-user" />
         </div>
       )}
     </div>
@@ -186,6 +179,19 @@ export default function AppPage() {
     ? Object.fromEntries(result.criteria.map((c) => [c.id, c.label]))
     : {};
 
+  const [mobileDossierOpen, setMobileDossierOpen] = useState(false);
+
+  // Auto-open dossier on mobile when results arrive
+  useEffect(() => {
+    if (result) setMobileDossierOpen(true);
+  }, [result]);
+
+  const EXAMPLE_QUERIES = [
+    "Best air purifier for a dusty apartment",
+    "Noise-cancelling headphones under ₹10,000",
+    "Safe non-stick cookware without PFAS",
+  ];
+
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Header */}
@@ -195,14 +201,15 @@ export default function AppPage() {
             <Image src="/logo.png" alt="" width={32} height={32} className="h-8 w-auto" />
             <span className="font-serif text-xl text-foreground">ShortList</span>
           </Link>
-          <span className="text-border select-none">·</span>
-          <p className="text-xs text-muted-foreground">From endless options to confident decisions.</p>
+          <span className="text-border select-none hidden sm:inline">·</span>
+          <p className="text-xs text-muted-foreground hidden sm:block">From endless options to confident decisions.</p>
         </div>
       </header>
 
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left: Chat */}
-        <div className="w-[420px] shrink-0 flex flex-col border-r border-border bg-card">
+      {/* Mobile: stacked layout. Desktop: side-by-side. */}
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+        {/* Left: Chat — full width on mobile, fixed width on desktop */}
+        <div className={`flex flex-col border-b md:border-b-0 md:border-r border-border bg-card md:w-[420px] md:shrink-0 ${mobileDossierOpen ? "hidden md:flex" : "flex"} flex-1 md:flex-none`}>
           {messages.length === 0 && (
             <div className="flex-1 flex flex-col items-center justify-center px-8 text-center gap-5">
               <div className="w-12 h-12 rounded-2xl bg-[#FFF0EB] flex items-center justify-center">
@@ -226,6 +233,20 @@ export default function AppPage() {
                 Try the demo query
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
+              {!used && (
+                <div className="w-full max-w-xs space-y-1.5">
+                  <p className="text-xs text-muted-foreground text-center font-mono">or try your own</p>
+                  {EXAMPLE_QUERIES.map((q) => (
+                    <button
+                      key={q}
+                      onClick={() => setInput(q)}
+                      className="w-full text-left text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-2 hover:bg-secondary/60 transition-colors"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -254,12 +275,27 @@ export default function AppPage() {
                 </div>
               ))}
               {loading && (
-                <div className="flex justify-start">
-                  <div className="bg-secondary rounded-2xl px-3.5 py-2.5 text-sm text-muted-foreground flex items-center gap-2">
-                    <span className="inline-block w-3 h-3 border-2 border-[#E85D2A] border-t-transparent rounded-full animate-spin" />
-                    Researching…
+                <>
+                  <div className="flex justify-start">
+                    <div className="bg-secondary rounded-2xl px-3.5 py-2.5 text-sm text-muted-foreground flex items-center gap-2">
+                      <span className="inline-block w-3 h-3 border-2 border-[#E85D2A] border-t-transparent rounded-full animate-spin" />
+                      Researching…
+                    </div>
                   </div>
-                </div>
+                  {/* Show progress inline on mobile since the right pane is hidden */}
+                  <div className="md:hidden">
+                    <ProgressCard steps={progressSteps} loading={loading} />
+                  </div>
+                </>
+              )}
+              {result && (
+                <button
+                  onClick={() => setMobileDossierOpen(true)}
+                  className="md:hidden w-full text-sm bg-[#E85D2A] hover:bg-[#d14e1f] text-white px-4 py-2.5 rounded-lg flex items-center justify-center gap-2"
+                >
+                  View full dossier
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
               )}
               <div ref={bottomRef} />
             </div>
@@ -288,12 +324,14 @@ export default function AppPage() {
                 onKeyDown={handleKeyDown}
                 placeholder={used ? "Demo limit reached." : "Ask ShortList to find a product…"}
                 disabled={loading || used}
+                aria-label="Search query"
                 className="flex-1 resize-none rounded-xl border border-border bg-secondary/50 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[#E85D2A]/30 disabled:opacity-50"
                 style={{ maxHeight: 120 }}
               />
               <button
                 onClick={() => sendQuery(input)}
                 disabled={loading || !input.trim() || used}
+                aria-label="Submit query"
                 className="inline-flex items-center justify-center bg-[#E85D2A] hover:bg-[#d14e1f] disabled:opacity-40 text-white h-9 w-9 rounded-xl transition-all duration-150 active:scale-[0.97]"
               >
                 <ArrowRight className="w-4 h-4" />
@@ -302,8 +340,21 @@ export default function AppPage() {
           </div>
         </div>
 
-        {/* Right: Research Dossier */}
-        <div ref={dossierRef} className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+        {/* Right: Research Dossier — full screen on mobile when open, always visible on desktop */}
+        <div
+          ref={dossierRef}
+          className={`flex-1 overflow-y-auto px-4 md:px-6 py-5 space-y-4 ${mobileDossierOpen ? "block" : "hidden md:block"}`}
+        >
+          {/* Mobile back button */}
+          {mobileDossierOpen && (
+            <button
+              onClick={() => setMobileDossierOpen(false)}
+              className="md:hidden flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-2"
+            >
+              ← Back to chat
+            </button>
+          )}
+
           {/* Empty state */}
           {!result && !loading && (
             <div className="flex items-center justify-center h-full">
@@ -311,21 +362,20 @@ export default function AppPage() {
             </div>
           )}
 
-          {/* Loading — show live progress only, no full dossier yet */}
+          {/* Loading — show live progress */}
           {loading && (
             <ProgressCard steps={progressSteps} loading={loading} />
           )}
 
-          {/* Results — verdict first, everything else below the fold */}
+          {/* Results */}
           {result && (
             <>
-              {/* 1. The verdict — hero, above the fold */}
               <RecommendationCard
                 recommendation={result.recommendation}
                 shortlist={result.shortlist}
+                criteriaLabels={criteriaLabels}
               />
 
-              {/* 2. Ranked shortlist — visual comparison, winner pre-expanded */}
               <div className="space-y-3">
                 <p className="text-xs font-mono tracking-[0.1em] uppercase text-muted-foreground">
                   Shortlist
@@ -340,10 +390,6 @@ export default function AppPage() {
                 ))}
               </div>
 
-              {/* 3. Memory save — action while confidence is high */}
-              <MemorySaveCard suggestions={result.memorySuggestions} userId="demo-user" />
-
-              {/* 4. How we decided — collapsed by default, full research log inside */}
               <HowWeDecided result={result} />
             </>
           )}

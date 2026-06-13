@@ -103,3 +103,39 @@ Then, quiet and small beneath that — almost a footnote:
 - **No talking head** — this story is stronger as pure narrative + screen. Keep it that way.
 - **Subtitles throughout** — judges watch on mute.
 - **The WhatsApp send in Scene 5** is the payoff moment most demo videos skip. Don't skip it. That's the proof it worked.
+
+---
+
+## Architecture (and how it serves the story)
+
+The whole pitch turns on one promise: *search finds products, Shortlist makes decisions.* The architecture is what makes that promise real. A single research orchestrator runs a swarm of focused passes, each one mapping to a beat the audience sees on screen.
+
+```
+              ┌──────────────────────────┐
+   User query │  Next.js UI (chat + dossier cards)
+      ───────▶│  /api/research-stream  (live progress)
+              └────────────┬─────────────┘
+                           ▼
+              ┌──────────────────────────┐
+              │   Research Orchestrator   │  (lib/orchestrator.ts)
+              │   Anthropic Claude via    │
+              │   Vercel AI SDK + Zod     │  ← every step returns typed JSON
+              └─┬───┬───┬───┬───┬───┬───┬─┘
+        Memory │   │   │   │   │   │   │ Verification
+         Mem0  │   │   │   │   │   │   │ (independent Claude pass)
+                   │   │   │   │   │
+       Intent ─────┘   │   │   │   └───── Recommendation
+       Discovery ──────┘   │   └───────── Ranking + red flags
+       (Exa + SerpApi)     └───────────── Evidence + Risk passes
+```
+
+| Layer | What we use | How it helps the product |
+|---|---|---|
+| **Frontend** | Next.js + streaming dossier cards | Every research step streams to screen as it happens — the audience *watches the thinking*, which is the whole "it did the work" beat (Scene 4, 0:54). |
+| **Reasoning** | Anthropic Claude (Sonnet for judgment, Haiku for fast query-building) via Vercel AI SDK, all outputs schema-validated with Zod | Decisions are structured, not prose. That's why the UI can render clean Criteria / Red Flag / Recommendation cards instead of a wall of text. |
+| **Memory** | Mem0 | Loads "what matters to her" before researching — the emotional core of the demo (Scene 4, 0:47) and the reason the result feels personal, not generic. |
+| **Discovery** | Exa (neural/semantic web search) + SerpApi (live Amazon results), run in parallel | Two complementary lenses — real marketplace listings *and* the wider web of reviews — so the shortlist reflects what's actually buyable, not just what ranks. |
+| **Evidence + Risk** | Parallel Claude passes over each candidate | Surfaces red flags, not just positives (Scene 4, 1:06). This is the trust-builder — it's why one answer becomes a *confident* answer. |
+| **Verification** | A second, independent Claude pass that critiques the recommendation | Models a "second opinion" before you commit — the difference between a guess and a decision you can stand behind. |
+
+**The one-line version for judges:** a typed, streaming research swarm — Claude orchestrating Mem0 memory, Exa + Amazon discovery, and parallel evidence/risk/verification passes — turns "486 results" into one decision you can defend. Every card in the demo is a real module output, not a mockup.

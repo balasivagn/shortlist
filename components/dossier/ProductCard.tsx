@@ -53,7 +53,7 @@ export function ProductCard({ product, rank, criteriaLabels }: {
   readonly rank: number;
   readonly criteriaLabels?: Record<string, string>;
 }) {
-  const [expanded, setExpanded] = useState(rank === 0);
+  const [expanded, setExpanded] = useState(false);
   const vc = verdictConfig[product.verdict];
   const imageUrl = product.product.thumbnail ?? product.product.imageUrl;
   const amazonUrl = product.product.amazonUrl ?? `https://www.amazon.in/s?k=${encodeURIComponent(product.product.name)}`;
@@ -91,8 +91,8 @@ export function ProductCard({ product, rank, criteriaLabels }: {
             </div>
 
             <div className="flex flex-col items-end gap-1 shrink-0">
-              <span className="text-base font-semibold font-mono text-foreground">
-                {product.totalScore}<span className="text-sm font-normal text-muted-foreground">/100</span>
+              <span className="text-base font-semibold font-mono text-foreground" title="Fit score for your constraints out of 100">
+                {product.totalScore}<span className="text-xs font-normal text-muted-foreground"> fit</span>
               </span>
               {product.product.rating != null && (
                 <span className="flex items-center gap-1 text-sm text-muted-foreground">
@@ -187,8 +187,8 @@ export function ProductCard({ product, rank, criteriaLabels }: {
             <div>
               <p className="text-sm font-mono text-destructive uppercase tracking-[0.08em] mb-2">All Red Flags</p>
               <ul className="space-y-2">
-                {product.redFlags.map((r) => (
-                  <li key={r.risk} className="text-sm text-muted-foreground flex gap-2">
+                {product.redFlags.map((r, i) => (
+                  <li key={`${r.risk}-${i}`} className="text-sm text-muted-foreground flex gap-2">
                     <AlertTriangle className={`w-4 h-4 shrink-0 mt-0.5 ${severityConfig[r.severity]}`} />
                     <span>
                       <span className="line-clamp-2">{r.risk}</span>

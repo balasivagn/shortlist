@@ -20,3 +20,4 @@ tsconfig.tsbuildinfo
 # Claude Code
 .claude/
 .vercel
+.gstack/

@@ -4,20 +4,28 @@ import { ExternalLink, Share2, Check, Star, AlertTriangle, CheckCircle2 } from "
 import type { ResearchResult } from "@/lib/contracts";
 
 function confidenceColor(pct: number): string {
-  if (pct >= 75) return "bg-[#22C55E]";
-  if (pct >= 50) return "bg-[#E85D2A]";
+  if (pct >= 60) return "bg-[#22C55E]";
+  if (pct >= 35) return "bg-[#E85D2A]";
   return "bg-destructive";
+}
+
+function confidenceLabel(pct: number): string {
+  if (pct >= 75) return "high confidence";
+  if (pct >= 50) return "good confidence";
+  if (pct >= 35) return "moderate confidence";
+  return "limited data";
 }
 
 function ConfidenceBar({ value }: { readonly value: number }) {
   const pct = Math.round(value * 100);
   const color = confidenceColor(pct);
+  const label = confidenceLabel(pct);
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1 bg-border/60 rounded-full h-1.5">
         <div className={`${color} h-1.5 rounded-full transition-all`} style={{ width: `${pct}%` }} />
       </div>
-      <span className="text-sm font-mono text-muted-foreground">{pct}% confident</span>
+      <span className="text-sm font-mono text-muted-foreground">{label}</span>
     </div>
   );
 }
@@ -25,9 +33,11 @@ function ConfidenceBar({ value }: { readonly value: number }) {
 export function RecommendationCard({
   recommendation,
   shortlist,
+  criteriaLabels = {},
 }: {
   readonly recommendation: ResearchResult["recommendation"];
   readonly shortlist: ResearchResult["shortlist"];
+  readonly criteriaLabels?: Record<string, string>;
 }) {
   const [copied, setCopied] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
@@ -142,7 +152,7 @@ export function RecommendationCard({
                 className="inline-flex items-center gap-1.5 text-sm bg-[#F0FDF4] text-[#22C55E] border border-[#22C55E]/30 px-2.5 py-1 rounded-full"
               >
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                {cs.criterionId.replaceAll("-", " ")}
+                {criteriaLabels[cs.criterionId] ?? cs.criterionId.replaceAll("-", " ")}
               </span>
             ))}
         </div>
