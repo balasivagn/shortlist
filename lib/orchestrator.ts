@@ -90,15 +90,13 @@ ${memoryContext}
 Extract:
 - productType: the full type including modifiers (e.g. "electric vegetable chopper", "manual push chopper")
 - productCategory: short noun only (e.g. "vegetable chopper", "blender", "air purifier")
-- mustBeElectric: true if query implies electric, false if manual, null if ambiguous
+- mustBeElectric: true if query explicitly says "electric" or implies powered use; false ONLY if query explicitly says "manual"; null if ambiguous. IMPORTANT: "elderly", "easy to use", "low effort" do NOT imply manual — electric is almost always the lower-effort choice for elderly users. Only set false if the user literally asked for manual.
 - priceTier: infer from query keywords (budget=cheap/affordable, premium=best/high-end, balanced=good/value, unknown if not mentioned)
 - whoIsItFor: the intended user from the query
 - location: where to buy — extract from query (e.g. "in Singapore", "in the US"). If not mentioned, use the location hint if provided, otherwise use "online" as a neutral default. Never assume India.
 - cleanSearchQuery: a tight 4-8 word Amazon search string. Focus on the product type + key feature. Do NOT include constraints like "dishwasher safe" or "elderly" — those are filters, not search terms.
-- inferredConstraints: constraints that are clearly implied by the query (e.g. "elderly parents" → "easy to grip", "easy to clean"). Do NOT include price constraints here.
-- assumptionsMade: list any non-obvious assumptions you made about what the user wants
-
-Be precise. If the query says "chopper for elderly parents", whoIsItFor is "elderly parents" and infer "easy to use", "low effort", "simple mechanism" as constraints.`,
+- inferredConstraints: constraints clearly implied by the query. For elderly users infer: "easy to operate", "low hand strength required", "easy to clean", "stable base". Do NOT infer "manual" or "simple mechanism" — that is not a constraint, it is a product type decision.
+- assumptionsMade: list any non-obvious assumptions you made about what the user wants`,
   });
 
   return object;
@@ -155,24 +153,39 @@ Rules:
 
 // ─── Main Research Flow ───────────────────────────────────────────────────────
 
+const RESEARCH_PLAN = [
+  "Loading your preferences",
+  "Understanding your query",
+  "Searching for products",
+  "Building evaluation criteria",
+  "Collecting evidence & risks",
+  "Scoring candidates",
+  "Generating recommendation",
+  "Independent verification",
+];
+
 export async function runResearch(
   req: ResearchRequest,
-  onProgress?: (step: string) => void
+  onProgress?: (step: string, done?: boolean) => void
 ): Promise<ResearchResult> {
   const progress: string[] = [];
 
+  onProgress?.("__plan__:" + RESEARCH_PLAN.join("|"));
+
   function emit(step: string) {
     progress.push(step);
-    onProgress?.(step);
+    onProgress?.(step, true);
   }
 
-  emit("Loading remembered preferences…");
+  onProgress?.("Loading your preferences", false);
   const memories = await getDecisionMemory(req.userId, req.query);
 
-  emit("Understanding your query…");
+  emit("Loading your preferences");
+  onProgress?.("Understanding your query", false);
   const intent = await parseIntent(req, memories);
 
-  emit(`Searching for ${intent.productType} options…`);
+  emit("Understanding your query");
+  onProgress?.("Searching for products", false);
 
   // Build a clean constraint list (no price, no junk)
   const allConstraints = [
@@ -208,57 +221,63 @@ export async function runResearch(
   if (serpResult.status === "rejected") sourceParts.push("Amazon unavailable");
 
   const totalScanned = exaProducts.length + serpProducts.length;
-  emit(`Scanned ${totalScanned} products (${sourceParts.join(", ")}), shortlisted ${candidates.length}.`);
-  emit("Building evaluation criteria from your preferences…");
+  const sourceSummary = sourceParts.length > 0 ? ` (${sourceParts.join(", ")})` : "";
+  emit(`Searching for products`);
+  progress[progress.length - 1] = `Found ${totalScanned} products${sourceSummary}, shortlisted ${candidates.length}`;
 
-  const criteria = await buildCriteria(intent, memories, req);
+  onProgress?.("Building evaluation criteria", false);
+  onProgress?.("Collecting evidence & risks", false);
 
-  emit(`Collecting evidence for ${candidates.length} candidates…`);
-
-  // Exa rate limit is 10 req/s — batch 3 candidates at a time (6 calls/batch)
+  // Criteria + evidence collection are independent — run in parallel
   const evidenceArrays: EvidenceItem[][] = new Array(candidates.length);
   const riskArrays: RiskItem[][] = new Array(candidates.length);
-  const BATCH = 3;
-  for (let i = 0; i < candidates.length; i += BATCH) {
-    const batch = candidates.slice(i, i + BATCH);
-    await Promise.all(
-      batch.map(async (c, j) => {
-        const [ev, ri] = await Promise.all([
-          gatherEvidence(c.id, c.name, intent.productType),
-          gatherRisks(c.id, c.name, intent.productType),
-        ]);
-        evidenceArrays[i + j] = ev;
-        riskArrays[i + j] = ri;
-      })
-    );
+
+  // Exa rate limit is 10 req/s — 5 candidates at a time = 10 calls/batch, right at the limit
+  const BATCH = 5;
+  async function collectEvidence() {
+    for (let i = 0; i < candidates.length; i += BATCH) {
+      const batch = candidates.slice(i, i + BATCH);
+      await Promise.all(
+        batch.map(async (c, j) => {
+          const [ev, ri] = await Promise.all([
+            gatherEvidence(c.id, c.name, intent.productType),
+            gatherRisks(c.id, c.name, intent.productType),
+          ]);
+          evidenceArrays[i + j] = ev;
+          riskArrays[i + j] = ri;
+        })
+      );
+    }
   }
 
+  const [criteria] = await Promise.all([
+    buildCriteria(intent, memories, req),
+    collectEvidence(),
+  ]);
+
+  emit("Building evaluation criteria");
   const allEvidence: EvidenceItem[] = evidenceArrays.flat();
   const allRisks: RiskItem[] = riskArrays.flat();
 
-  emit("Scoring candidates against your criteria…");
+  emit("Collecting evidence & risks");
+  onProgress?.("Scoring candidates", false);
   const ranked = await scoreAndRank(candidates, allEvidence, allRisks, criteria, memories, req, intent);
 
-  emit("Generating recommendation…");
+  emit("Scoring candidates");
+  onProgress?.("Generating recommendation", false);
   const topPick = ranked[0];
   const recommendation = await generateRecommendation(topPick, req, memories, intent);
 
-  emit("Running independent verification pass…");
+  emit("Generating recommendation");
+  onProgress?.("Independent verification", false);
   const verification = await runVerification(topPick, recommendation, intent);
 
-  let verificationStep: string;
-  if (verification.status === "unavailable") {
-    verificationStep = "Verification skipped — ANTHROPIC_API_KEY not set for verifier.";
-  } else if (verification.summary) {
-    verificationStep = `Verification complete — verifier ${verification.status}: ${verification.summary}`;
-  } else {
-    verificationStep = `Verification complete — verifier ${verification.status}.`;
-  }
-  emit(verificationStep);
-  emit("Research complete.");
+  const verifierVerdict = verification.status === "unavailable" ? "skipped" : verification.status;
+  const verifierSuffix = verification.summary ? " — " + verification.summary : "";
+  emit("Independent verification");
+  progress[progress.length - 1] = "Verification " + verifierVerdict + verifierSuffix;
 
-  // Build memory suggestions from assumptions and intent
-  const memorySuggestions = buildMemorySuggestions(intent, memories, req);
+  emit("Research complete.");
 
   return {
     request: req,
@@ -268,30 +287,7 @@ export async function runResearch(
     shortlist: ranked.slice(0, 3),
     recommendation,
     verification,
-    memorySuggestions,
   };
-}
-
-function buildMemorySuggestions(
-  intent: ParsedIntent,
-  memories: { text: string }[],
-  req: ResearchRequest
-): string[] {
-  const suggestions: string[] = [];
-
-  if (intent.priceTier !== "unknown") {
-    suggestions.push(`Remember: prefers ${intent.priceTier} price tier for ${intent.productCategory}.`);
-  }
-  if (intent.mustBeElectric === true) {
-    suggestions.push(`Remember: prefers electric ${intent.productCategory} over manual.`);
-  } else if (intent.mustBeElectric === false) {
-    suggestions.push(`Remember: prefers manual ${intent.productCategory} over electric.`);
-  }
-  if (intent.whoIsItFor && intent.whoIsItFor !== "self") {
-    suggestions.push(`Remember: buying for ${intent.whoIsItFor} — ease of use matters more than features.`);
-  }
-
-  return suggestions.slice(0, 3);
 }
 
 // ─── Verification ─────────────────────────────────────────────────────────────
@@ -393,7 +389,7 @@ async function scoreAndRank(
   const criteriaDesc = criteria.map((c) => `${c.id} (weight ${c.weight}): ${c.label}`).join(", ");
 
   const { object } = await generate({ // NOSONAR
-    model,
+    model: haiku,
     schema: ScoringSchema,
     prompt: `You are a buying advisor helping someone choose a ${intent.productType}.
 

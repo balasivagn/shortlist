@@ -2,17 +2,29 @@
 
 import { useState, useRef, useEffect } from "react";
 import { ArrowRight, Zap, ChevronDown, ChevronUp } from "lucide-react";
+import { useAuth, UserButton } from "@clerk/nextjs";
 import { MemoryCard } from "@/components/dossier/MemoryCard";
 import { CriteriaCard } from "@/components/dossier/CriteriaCard";
 import { ProgressCard } from "@/components/dossier/ProgressCard";
 import { ProductCard } from "@/components/dossier/ProductCard";
 import { RecommendationCard } from "@/components/dossier/RecommendationCard";
-import { MemorySaveCard } from "@/components/dossier/MemorySaveCard";
 import type { ResearchResult } from "@/lib/contracts";
 import Link from "next/link";
 import Image from "next/image";
 
 type Message = { role: "user" | "assistant"; content: string };
+type CompletedStep = { label: string; detail?: string };
+
+const LOCATION_OPTIONS = [
+  { label: "🇺🇸 United States", value: "US" },
+  { label: "🇬🇧 United Kingdom", value: "UK" },
+  { label: "🇮🇳 India", value: "India" },
+  { label: "🇨🇦 Canada", value: "Canada" },
+  { label: "🇦🇺 Australia", value: "Australia" },
+  { label: "🇩🇪 Germany", value: "Germany" },
+  { label: "🇸🇬 Singapore", value: "Singapore" },
+  { label: "🇦🇪 UAE", value: "UAE" },
+];
 
 function parseSseChunk(part: string): { event: string; payload: unknown } | null {
   const eventMatch = /^event: (\w+)/.exec(part);
@@ -23,10 +35,10 @@ function parseSseChunk(part: string): { event: string; payload: unknown } | null
 
 const DEMO_QUERY = "Find a vegetable chopper for my elderly parents in India.";
 
-const USED_KEY = "shortlist_used";
-
 function HowWeDecided({ result }: { readonly result: ResearchResult }) {
   const [open, setOpen] = useState(false);
+  // Build completed steps from researchProgress for the final dossier view
+  const completedSteps: CompletedStep[] = result.researchProgress.map((s) => ({ label: s }));
 
   return (
     <div className="rounded-xl border border-border overflow-hidden">
@@ -45,8 +57,12 @@ function HowWeDecided({ result }: { readonly result: ResearchResult }) {
         <div className="p-4 space-y-4 border-t border-border">
           <MemoryCard memories={result.rememberedPreferences} />
           <CriteriaCard criteria={result.criteria} />
-          <ProgressCard steps={result.researchProgress} loading={false} />
-          <MemorySaveCard suggestions={result.memorySuggestions} userId="demo-user" />
+          <ProgressCard
+            plan={completedSteps.map((s) => s.label)}
+            completedSteps={completedSteps}
+            activeStep={null}
+            loading={false}
+          />
         </div>
       )}
     </div>
@@ -54,49 +70,34 @@ function HowWeDecided({ result }: { readonly result: ResearchResult }) {
 }
 
 export default function AppPage() {
+  const { userId } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [checkingLocation, setCheckingLocation] = useState(false);
+  const [pendingQuery, setPendingQuery] = useState<string | null>(null);
   const [result, setResult] = useState<ResearchResult | null>(null);
-  const [progressSteps, setProgressSteps] = useState<string[]>([]);
+  const [progressPlan, setProgressPlan] = useState<string[]>([]);
+  const [completedSteps, setCompletedSteps] = useState<CompletedStep[]>([]);
+  const [activeStep, setActiveStep] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const isLocalhost =
-    globalThis.window !== undefined &&
-    (location.hostname === "localhost" || location.hostname === "127.0.0.1");
-  const [used, setUsed] = useState(() =>
-    !isLocalhost &&
-    globalThis.window !== undefined &&
-    localStorage.getItem(USED_KEY) === "1"
-  );
-  const [showToast, setShowToast] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const dossierRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+  }, [messages, loading, checkingLocation]);
 
-  // Scroll dossier to top when results arrive
   useEffect(() => {
-    if (result) {
-      dossierRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-    }
+    if (result) dossierRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }, [result]);
 
-  // Pre-fill input from ?q= query param (landing page popular queries)
   useEffect(() => {
     const q = new URLSearchParams(globalThis.location?.search).get("q");
     if (q) setInput(q);
   }, []);
 
-  function showDemoLimitToast() {
-    setShowToast(true);
-    setTimeout(() => setShowToast(false), 4000);
-  }
-
   async function handleStreamResult(data: ResearchResult) {
-    localStorage.setItem(USED_KEY, "1");
-    setUsed(true);
     setResult(data);
     setMessages((prev) => [
       ...prev,
@@ -107,24 +108,19 @@ export default function AppPage() {
     ]);
   }
 
-  async function sendQuery(query: string) {
-    if (!query.trim() || loading) return;
-    if (used) { showDemoLimitToast(); return; }
-    setInput("");
+  async function runResearch(query: string) {
     setError(null);
     setResult(null);
-    setProgressSteps([]);
-    setMessages((prev) => [...prev, { role: "user", content: query }]);
+    setProgressPlan([]);
+    setCompletedSteps([]);
+    setActiveStep(null);
     setLoading(true);
 
     try {
       const res = await fetch("/api/research-stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: "demo-user",
-          query,
-        }),
+        body: JSON.stringify({ userId, query }),
       });
 
       if (!res.ok || !res.body) {
@@ -147,8 +143,17 @@ export default function AppPage() {
         for (const part of parts) {
           const chunk = parseSseChunk(part);
           if (!chunk) continue;
-          if (chunk.event === "progress") {
-            setProgressSteps((prev) => [...prev, (chunk.payload as { step: string }).step]);
+
+          if (chunk.event === "plan") {
+            setProgressPlan((chunk.payload as { steps: string[] }).steps);
+          } else if (chunk.event === "progress") {
+            const { step, done: isDone } = chunk.payload as { step: string; done: boolean };
+            if (isDone) {
+              setCompletedSteps((prev) => [...prev, { label: step }]);
+              setActiveStep(null);
+            } else {
+              setActiveStep(step);
+            }
           } else if (chunk.event === "result") {
             await handleStreamResult(chunk.payload as ResearchResult);
           } else if (chunk.event === "error") {
@@ -168,6 +173,45 @@ export default function AppPage() {
     }
   }
 
+  async function sendQuery(query: string) {
+    if (!query.trim() || loading || checkingLocation) return;
+    setInput("");
+    setMessages((prev) => [...prev, { role: "user", content: query }]);
+
+    setCheckingLocation(true);
+    try {
+      const check = await fetch("/api/check-location", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query }),
+      });
+      const { needsLocation } = await check.json();
+
+      if (needsLocation) {
+        setPendingQuery(query);
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: "Where are you shopping for this?" },
+        ]);
+        return;
+      }
+    } catch {
+      // proceed without location if check fails
+    } finally {
+      setCheckingLocation(false);
+    }
+
+    await runResearch(query);
+  }
+
+  async function handleLocationPick(location: string) {
+    if (!pendingQuery) return;
+    const queryWithLocation = pendingQuery + " (shopping in " + location + ")";
+    setPendingQuery(null);
+    setMessages((prev) => [...prev, { role: "user", content: location }]);
+    await runResearch(queryWithLocation);
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -180,21 +224,20 @@ export default function AppPage() {
     : {};
 
   const [mobileDossierOpen, setMobileDossierOpen] = useState(false);
-
-  // Auto-open dossier on mobile when results arrive
   useEffect(() => {
     if (result) setMobileDossierOpen(true);
   }, [result]);
 
   const EXAMPLE_QUERIES = [
     "Best air purifier for a dusty apartment",
-    "Noise-cancelling headphones under ₹10,000",
+    "Noise-cancelling headphones under $100",
     "Safe non-stick cookware without PFAS",
   ];
 
+  const isWaiting = loading || checkingLocation;
+
   return (
     <div className="h-screen flex flex-col bg-background">
-      {/* Header */}
       <header className="shrink-0 bg-card border-b border-border px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
@@ -204,11 +247,10 @@ export default function AppPage() {
           <span className="text-border select-none hidden sm:inline">·</span>
           <p className="text-xs text-muted-foreground hidden sm:block">From endless options to confident decisions.</p>
         </div>
+        <UserButton />
       </header>
 
-      {/* Mobile: stacked layout. Desktop: side-by-side. */}
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-        {/* Left: Chat — full width on mobile, fixed width on desktop */}
         <div className={`flex flex-col border-b md:border-b-0 md:border-r border-border bg-card md:w-[420px] md:shrink-0 ${mobileDossierOpen ? "hidden md:flex" : "flex"} flex-1 md:flex-none`}>
           {messages.length === 0 && (
             <div className="flex-1 flex flex-col items-center justify-center px-8 text-center gap-5">
@@ -227,26 +269,24 @@ export default function AppPage() {
               </div>
               <button
                 onClick={() => sendQuery(DEMO_QUERY)}
-                disabled={used}
+                disabled={isWaiting}
                 className="inline-flex items-center gap-2 text-sm bg-[#E85D2A] hover:bg-[#d14e1f] disabled:opacity-40 text-white px-5 py-2.5 rounded-lg transition-all duration-150 active:scale-[0.97]"
               >
                 Try the demo query
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
-              {!used && (
-                <div className="w-full max-w-xs space-y-1.5">
-                  <p className="text-xs text-muted-foreground text-center font-mono">or try your own</p>
-                  {EXAMPLE_QUERIES.map((q) => (
-                    <button
-                      key={q}
-                      onClick={() => setInput(q)}
-                      className="w-full text-left text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-2 hover:bg-secondary/60 transition-colors"
-                    >
-                      {q}
-                    </button>
-                  ))}
-                </div>
-              )}
+              <div className="w-full max-w-xs space-y-1.5">
+                <p className="text-xs text-muted-foreground text-center font-mono">or try your own</p>
+                {EXAMPLE_QUERIES.map((q) => (
+                  <button
+                    key={q}
+                    onClick={() => setInput(q)}
+                    className="w-full text-left text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-2 hover:bg-secondary/60 transition-colors"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -259,35 +299,46 @@ export default function AppPage() {
                 >
                   <div
                     className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm ${
-                      m.role === "user"
-                        ? "bg-[#1A1A1A] text-white"
-                        : "bg-secondary text-foreground"
+                      m.role === "user" ? "bg-[#1A1A1A] text-white" : "bg-secondary text-foreground"
                     }`}
                   >
                     {m.content.split("**").map((part, j) =>
-                      j % 2 === 1 ? (
-                        <strong key={part}>{part}</strong>
-                      ) : (
-                        <span key={part}>{part}</span>
-                      )
+                      j % 2 === 1 ? <strong key={part}>{part}</strong> : <span key={part}>{part}</span>
                     )}
                   </div>
                 </div>
               ))}
-              {loading && (
+
+              {pendingQuery && !loading && (
+                <div className="flex justify-start">
+                  <div className="flex flex-wrap gap-1.5 max-w-[85%]">
+                    {LOCATION_OPTIONS.map((loc) => (
+                      <button
+                        key={loc.value}
+                        onClick={() => handleLocationPick(loc.value)}
+                        className="text-xs border border-border rounded-full px-3 py-1.5 hover:border-[#E85D2A]/60 hover:bg-[#FFF0EB]/60 transition-all text-foreground"
+                      >
+                        {loc.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {isWaiting && (
                 <>
                   <div className="flex justify-start">
                     <div className="bg-secondary rounded-2xl px-3.5 py-2.5 text-sm text-muted-foreground flex items-center gap-2">
                       <span className="inline-block w-3 h-3 border-2 border-[#E85D2A] border-t-transparent rounded-full animate-spin" />
-                      Researching…
+                      {checkingLocation ? "Checking…" : "Researching…"}
                     </div>
                   </div>
-                  {/* Show progress inline on mobile since the right pane is hidden */}
                   <div className="md:hidden">
-                    <ProgressCard steps={progressSteps} loading={loading} />
+                    <ProgressCard plan={progressPlan} completedSteps={completedSteps} activeStep={activeStep} loading={loading} />
                   </div>
                 </>
               )}
+
               {result && (
                 <button
                   onClick={() => setMobileDossierOpen(true)}
@@ -301,36 +352,22 @@ export default function AppPage() {
             </div>
           )}
 
-          <div className="shrink-0 border-t border-border px-4 py-3 space-y-2">
-            {showToast && (
-              <div className="rounded-lg bg-[#1A1A1A] text-white text-xs px-3 py-2 flex items-center gap-2">
-                <span className="text-[#E85D2A]">●</span>
-                <span>
-                  This is a demo — each browser gets one free query.{" "}
-                  <span className="underline cursor-pointer">Join the waitlist.</span>
-                </span>
-              </div>
-            )}
-            {used && !showToast && (
-              <p className="text-xs text-muted-foreground text-center">
-                Demo limit reached — one query per browser.
-              </p>
-            )}
+          <div className="shrink-0 border-t border-border px-4 py-3">
             <div className="flex gap-2 items-end">
               <textarea
                 rows={1}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={used ? "Demo limit reached." : "Ask ShortList to find a product…"}
-                disabled={loading || used}
+                placeholder="Ask ShortList to find a product…"
+                disabled={isWaiting}
                 aria-label="Search query"
                 className="flex-1 resize-none rounded-xl border border-border bg-secondary/50 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[#E85D2A]/30 disabled:opacity-50"
                 style={{ maxHeight: 120 }}
               />
               <button
                 onClick={() => sendQuery(input)}
-                disabled={loading || !input.trim() || used}
+                disabled={isWaiting || !input.trim()}
                 aria-label="Submit query"
                 className="inline-flex items-center justify-center bg-[#E85D2A] hover:bg-[#d14e1f] disabled:opacity-40 text-white h-9 w-9 rounded-xl transition-all duration-150 active:scale-[0.97]"
               >
@@ -340,12 +377,10 @@ export default function AppPage() {
           </div>
         </div>
 
-        {/* Right: Research Dossier — full screen on mobile when open, always visible on desktop */}
         <div
           ref={dossierRef}
           className={`flex-1 overflow-y-auto px-4 md:px-6 py-5 space-y-4 ${mobileDossierOpen ? "block" : "hidden md:block"}`}
         >
-          {/* Mobile back button */}
           {mobileDossierOpen && (
             <button
               onClick={() => setMobileDossierOpen(false)}
@@ -355,19 +390,21 @@ export default function AppPage() {
             </button>
           )}
 
-          {/* Empty state */}
           {!result && !loading && (
             <div className="flex items-center justify-center h-full">
               <p className="text-sm text-muted-foreground font-mono">Your research dossier will appear here.</p>
             </div>
           )}
 
-          {/* Loading — show live progress */}
           {loading && (
-            <ProgressCard steps={progressSteps} loading={loading} />
+            <ProgressCard
+              plan={progressPlan}
+              completedSteps={completedSteps}
+              activeStep={activeStep}
+              loading={loading}
+            />
           )}
 
-          {/* Results */}
           {result && (
             <>
               <RecommendationCard
@@ -375,21 +412,12 @@ export default function AppPage() {
                 shortlist={result.shortlist}
                 criteriaLabels={criteriaLabels}
               />
-
               <div className="space-y-3">
-                <p className="text-xs font-mono tracking-[0.1em] uppercase text-muted-foreground">
-                  Shortlist
-                </p>
+                <p className="text-xs font-mono tracking-[0.1em] uppercase text-muted-foreground">Shortlist</p>
                 {result.shortlist.map((p, i) => (
-                  <ProductCard
-                    key={p.product.id}
-                    product={p}
-                    rank={i}
-                    criteriaLabels={criteriaLabels}
-                  />
+                  <ProductCard key={p.product.id} product={p} rank={i} criteriaLabels={criteriaLabels} />
                 ))}
               </div>
-
               <HowWeDecided result={result} />
             </>
           )}

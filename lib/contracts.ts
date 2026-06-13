@@ -95,7 +95,6 @@ export type ResearchResult = {
     confidence: number;
   };
   verification?: VerificationResult;
-  memorySuggestions: string[];
 };
 
 export type ModuleError = {
