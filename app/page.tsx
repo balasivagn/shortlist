@@ -94,17 +94,18 @@ export default function LandingPage() {
                 { query: "Noise-cancelling headphones under $200", stat: "5 red flags found" },
                 { query: "Ergonomic office chair for back pain", stat: "3 options ranked" },
                 { query: "Safe non-stick cookware without PFAS", stat: "Evidence-backed pick" },
-              ].map((item, i) => (
-                <div
-                  key={i}
-                  className="group border border-border rounded-xl p-5 hover:shadow-lg hover:shadow-black/[0.04] transition-all duration-200 cursor-pointer"
+              ].map((item) => (
+                <Link
+                  key={item.query}
+                  href={`/app?q=${encodeURIComponent(item.query)}`}
+                  className="group border border-border rounded-xl p-5 hover:shadow-lg hover:shadow-black/[0.04] hover:border-[#E85D2A]/40 transition-all duration-200"
                 >
                   <p className="text-sm font-medium text-foreground mb-3 leading-snug">{item.query}</p>
                   <div className="flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E]" />
                     <span className="font-mono text-xs text-muted-foreground">{item.stat}</span>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           </div>

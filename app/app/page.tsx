@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { ArrowRight, Zap } from "lucide-react";
+import { ArrowRight, Zap, ChevronDown, ChevronUp } from "lucide-react";
 import { MemoryCard } from "@/components/dossier/MemoryCard";
 import { CriteriaCard } from "@/components/dossier/CriteriaCard";
 import { ProgressCard } from "@/components/dossier/ProgressCard";
@@ -14,18 +14,51 @@ import Image from "next/image";
 
 type Message = { role: "user" | "assistant"; content: string };
 
+function parseSseChunk(part: string): { event: string; payload: unknown } | null {
+  const eventMatch = /^event: (\w+)/.exec(part);
+  const dataMatch = /^data: (.+)$/m.exec(part);
+  if (!eventMatch || !dataMatch) return null;
+  return { event: eventMatch[1], payload: JSON.parse(dataMatch[1]) };
+}
+
 const DEMO_QUERY = "Find a vegetable chopper for my elderly parents in India.";
 
-const LOADING_STEPS = [
-  "Loading remembered preferences…",
-  "Discovering product candidates…",
-  "Collecting reviews and evidence…",
-  "Identifying red flags…",
-  "Scoring against your criteria…",
-  "Generating recommendation…",
-];
-
 const USED_KEY = "shortlist_used";
+
+function HowWeDecided({ result }: { readonly result: ResearchResult }) {
+  const [open, setOpen] = useState(false);
+  const criteriaLabels = Object.fromEntries(result.criteria.map((c) => [c.id, c.label]));
+
+  return (
+    <div className="rounded-xl border border-border overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-secondary/40 hover:bg-secondary/70 transition-colors text-sm font-medium text-foreground"
+      >
+        <span className="flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#E85D2A]" />
+          <span>How we decided</span>
+        </span>
+        {open ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+      </button>
+
+      {open && (
+        <div className="p-4 space-y-4 border-t border-border">
+          <MemoryCard memories={result.rememberedPreferences} />
+          <CriteriaCard criteria={result.criteria} />
+          <ProgressCard steps={result.researchProgress} loading={false} />
+          {/* expose criteriaLabels for ProductCards inside accordion too */}
+          <div className="space-y-3">
+            <p className="text-xs font-mono tracking-[0.1em] uppercase text-muted-foreground">Full Shortlist</p>
+            {result.shortlist.map((p, i) => (
+              <ProductCard key={p.product.id} product={p} rank={i} criteriaLabels={criteriaLabels} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function AppPage() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -34,19 +67,51 @@ export default function AppPage() {
   const [result, setResult] = useState<ResearchResult | null>(null);
   const [progressSteps, setProgressSteps] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const isLocalhost =
+    globalThis.window !== undefined &&
+    (location.hostname === "localhost" || location.hostname === "127.0.0.1");
   const [used, setUsed] = useState(() =>
-    globalThis.window !== undefined && localStorage.getItem(USED_KEY) === "1"
+    !isLocalhost &&
+    globalThis.window !== undefined &&
+    localStorage.getItem(USED_KEY) === "1"
   );
   const [showToast, setShowToast] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const dossierRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
+  // Scroll dossier to top when results arrive
+  useEffect(() => {
+    if (result) {
+      dossierRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [result]);
+
+  // Pre-fill input from ?q= query param (landing page popular queries)
+  useEffect(() => {
+    const q = new URLSearchParams(globalThis.location?.search).get("q");
+    if (q) setInput(q);
+  }, []);
+
   function showDemoLimitToast() {
     setShowToast(true);
     setTimeout(() => setShowToast(false), 4000);
+  }
+
+  async function handleStreamResult(data: ResearchResult) {
+    localStorage.setItem(USED_KEY, "1");
+    setUsed(true);
+    setResult(data);
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "assistant",
+        content: `Done. Top pick: **${data.shortlist[0]?.product.name}** (${data.shortlist[0]?.totalScore}/100). ${data.recommendation.headline}`,
+      },
+    ]);
   }
 
   async function sendQuery(query: string) {
@@ -59,58 +124,51 @@ export default function AppPage() {
     setMessages((prev) => [...prev, { role: "user", content: query }]);
     setLoading(true);
 
-    let stepIdx = 0;
-    const stepInterval = setInterval(() => {
-      if (stepIdx < LOADING_STEPS.length) {
-        setProgressSteps((prev) => [...prev, LOADING_STEPS[stepIdx]]);
-        stepIdx++;
-      }
-    }, 1800);
-
     try {
-      const res = await fetch("/api/research", {
+      const res = await fetch("/api/research-stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId: "demo-user",
           query,
-          location: "India",
-          productCategory: "vegetable chopper",
-          explicitConstraints: [
-            "elderly friendly",
-            "dishwasher safe",
-            "easy cleaning",
-            "avoid food-contact plastic if possible",
-          ],
         }),
       });
 
-      clearInterval(stepInterval);
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error ?? "Research failed");
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error ?? "Research failed");
       }
 
-      const data: ResearchResult = await res.json();
-      localStorage.setItem(USED_KEY, "1");
-      setUsed(true);
-      setProgressSteps(data.researchProgress);
-      setResult(data);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `I've researched ${data.shortlist.length} vegetable choppers for you. The top pick is **${data.shortlist[0]?.product.name}** with a score of ${data.shortlist[0]?.totalScore}/100. ${data.recommendation.why}`,
-        },
-      ]);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+
+        for (const part of parts) {
+          const chunk = parseSseChunk(part);
+          if (!chunk) continue;
+          if (chunk.event === "progress") {
+            setProgressSteps((prev) => [...prev, (chunk.payload as { step: string }).step]);
+          } else if (chunk.event === "result") {
+            await handleStreamResult(chunk.payload as ResearchResult);
+          } else if (chunk.event === "error") {
+            throw new Error((chunk.payload as { message: string }).message);
+          }
+        }
+      }
     } catch (err: unknown) {
-      clearInterval(stepInterval);
       const msg = err instanceof Error ? err.message : "Something went wrong";
       setError(msg);
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: `Sorry, I hit an error: ${msg}` },
+        { role: "assistant", content: `Sorry, something went wrong: ${msg}` },
       ]);
     } finally {
       setLoading(false);
@@ -123,6 +181,10 @@ export default function AppPage() {
       sendQuery(input);
     }
   }
+
+  const criteriaLabels = result
+    ? Object.fromEntries(result.criteria.map((c) => [c.id, c.label]))
+    : {};
 
   return (
     <div className="h-screen flex flex-col bg-background">
@@ -169,9 +231,9 @@ export default function AppPage() {
 
           {messages.length > 0 && (
             <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-              {messages.map((m, i) => (
+              {messages.map((m) => (
                 <div
-                  key={i}
+                  key={`${m.role}-${m.content.slice(0, 40)}`}
                   className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
                 >
                   <div
@@ -183,9 +245,9 @@ export default function AppPage() {
                   >
                     {m.content.split("**").map((part, j) =>
                       j % 2 === 1 ? (
-                        <strong key={j}>{part}</strong>
+                        <strong key={part}>{part}</strong>
                       ) : (
-                        <span key={j}>{part}</span>
+                        <span key={part}>{part}</span>
                       )
                     )}
                   </div>
@@ -205,13 +267,18 @@ export default function AppPage() {
 
           <div className="shrink-0 border-t border-border px-4 py-3 space-y-2">
             {showToast && (
-              <div className="rounded-lg bg-[#1A1A1A] text-white text-xs px-3 py-2 flex items-center gap-2 animate-fade-in">
+              <div className="rounded-lg bg-[#1A1A1A] text-white text-xs px-3 py-2 flex items-center gap-2">
                 <span className="text-[#E85D2A]">●</span>
-                <span>This is a demo — each browser gets one free query. Want full access? <span className="underline cursor-pointer">Join the waitlist.</span></span>
+                <span>
+                  This is a demo — each browser gets one free query.{" "}
+                  <span className="underline cursor-pointer">Join the waitlist.</span>
+                </span>
               </div>
             )}
             {used && !showToast && (
-              <p className="text-xs text-muted-foreground text-center">Demo limit reached — one query per browser.</p>
+              <p className="text-xs text-muted-foreground text-center">
+                Demo limit reached — one query per browser.
+              </p>
             )}
             <div className="flex gap-2 items-end">
               <textarea
@@ -236,32 +303,48 @@ export default function AppPage() {
         </div>
 
         {/* Right: Research Dossier */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+        <div ref={dossierRef} className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+          {/* Empty state */}
           {!result && !loading && (
             <div className="flex items-center justify-center h-full">
               <p className="text-sm text-muted-foreground font-mono">Your research dossier will appear here.</p>
             </div>
           )}
 
-          {(loading || result) && (
+          {/* Loading — show live progress only, no full dossier yet */}
+          {loading && (
             <ProgressCard steps={progressSteps} loading={loading} />
           )}
 
+          {/* Results — verdict first, everything else below the fold */}
           {result && (
             <>
-              <MemoryCard memories={result.rememberedPreferences} />
-              <CriteriaCard criteria={result.criteria} />
+              {/* 1. The verdict — hero, above the fold */}
               <RecommendationCard
                 recommendation={result.recommendation}
                 shortlist={result.shortlist}
               />
+
+              {/* 2. Ranked shortlist — visual comparison, winner pre-expanded */}
               <div className="space-y-3">
-                <h3 className="text-xs font-mono tracking-[0.1em] uppercase text-muted-foreground">Shortlist</h3>
+                <p className="text-xs font-mono tracking-[0.1em] uppercase text-muted-foreground">
+                  Shortlist
+                </p>
                 {result.shortlist.map((p, i) => (
-                  <ProductCard key={p.product.id} product={p} rank={i} />
+                  <ProductCard
+                    key={p.product.id}
+                    product={p}
+                    rank={i}
+                    criteriaLabels={criteriaLabels}
+                  />
                 ))}
               </div>
+
+              {/* 3. Memory save — action while confidence is high */}
               <MemorySaveCard suggestions={result.memorySuggestions} userId="demo-user" />
+
+              {/* 4. How we decided — collapsed by default, full research log inside */}
+              <HowWeDecided result={result} />
             </>
           )}
 

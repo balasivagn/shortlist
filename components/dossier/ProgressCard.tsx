@@ -20,8 +20,8 @@ export function ProgressCard({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-1">
-        {steps.map((s, i) => (
-          <div key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+        {steps.filter((s) => s?.trim()).map((s) => (
+          <div key={s} className="flex items-start gap-2 text-sm text-muted-foreground">
             <span className="text-[#22C55E] mt-0.5 shrink-0">✓</span>
             <span>{s}</span>
           </div>

@@ -27,6 +27,7 @@ export type ProductCandidate = {
   name: string;
   brand?: string;
   url?: string;
+  amazonUrl?: string;
   priceText?: string;
   marketplace?: string;
   imageUrl?: string;
